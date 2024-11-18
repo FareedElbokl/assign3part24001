@@ -1,132 +1,139 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <string.h>
 
 #define NUM_TAS 5
-#define DATABASE "students.txt"
+#define NUM_STUDENTS 20
+#define SHM_KEY 1234
+#define SEM_KEY 5678
 
-// Function Prototypes
-void semaphore_lock(int semid, int sem_num);
-void semaphore_unlock(int semid, int sem_num);
-void ta_process(int ta_id, int semid);
-
-// Helper Function to generate random nums
-int generate_random(int min, int max) {
-    return rand() % (max - min + 1) + min;
+// Semaphore lock and unlock functions
+void lock(int semid, int semnum) {
+    struct sembuf op = {semnum, -1, 0}; // Decrement semaphore
+    semop(semid, &op, 1);
 }
 
-int main() {
-    // Set up semaphores and TA processes
-    key_t sem_key = 1234; // Semaphore key
-    int semid;
-    pid_t pids[NUM_TAS];
+void unlock(int semid, int semnum) {
+    struct sembuf op = {semnum, 1, 0}; // Increment semaphore
+    semop(semid, &op, 1);
+}
 
-    // Create semaphore set with 5 semaphores
-    semid = semget(sem_key, NUM_TAS, IPC_CREAT | 0666);
-    if (semid < 0) {
-        perror("semget failed");
-        exit(EXIT_FAILURE);
+// TA process logic
+void TA_process(int id, int semid, int* students) {
+    char filename[20];
+    sprintf(filename, "TA%d.txt", id);
+
+    FILE* output = fopen(filename, "w");
+    if (!output) {
+        perror("Failed to open TA file");
+        exit(1);
     }
 
-    // Initialize all semaphores to 1 (unlocked)
+    int rounds = 0;
+    int index = 0; // All TA's start at the first student (previously was id - 1)
+    srand(time(NULL) ^ getpid()); // Initialize random seed for delays
+
+    while (rounds < 3) {
+        // Lock semaphores for current TA and the next TA in the circular table
+        lock(semid, id - 1);          // Lock TA's own semaphore
+        lock(semid, id % NUM_TAS);    // Lock the next TA's semaphore
+
+        // Access the shared memory
+        printf("TA%d is currently accessing the database\n", id);
+        int student = students[index]; // Access "database" and store student in local var
+
+        // Simulate access database delay for 1-4 seconds
+        sleep(rand() % 4 + 1);
+
+        // Release semaphores before marking
+        unlock(semid, id - 1);        // Unlock TA's own semaphore
+        unlock(semid, id % NUM_TAS); // Unlock the next TA's semaphore
+
+        // Mark the student's test
+        int mark = rand() % 11; // Random mark between 0 and 10
+        fprintf(output, "TA%d marked student %04d with %d\n", id, student, mark);
+        fflush(output); // Ensure output is written immediately
+        printf("TA%d is marking student %04d with %d\n", id, student, mark);
+
+        // Simulate marking delay for 1-10 seconds
+        sleep(rand() % 10 + 1);
+
+        // Move to the next student
+        index = (index + 1) % NUM_STUDENTS;
+
+        // Check if the end of the list (student 9999) was just marked
+        if (student == 9999) {
+            rounds++; // Increment rounds after marking the last student
+        }
+    }
+
+    fclose(output);
+    printf("TA%d has finished marking.\n", id);
+}
+
+
+
+int main() {
+    // Create shared memory for student list
+    int shmid = shmget(SHM_KEY, NUM_STUDENTS * sizeof(int), IPC_CREAT | 0666);
+    if (shmid < 0) {
+        perror("shmget failed");
+        exit(1);
+    }
+
+    int* students = (int*)shmat(shmid, NULL, 0);
+    if (students == (void*)-1) {
+        perror("shmat failed");
+        exit(1);
+    }
+
+    // Initialize the student list in shared memory
+    for (int i = 0; i < NUM_STUDENTS - 1; i++) {
+        students[i] = 1000 + i; // Students numbered from 1000 to 1019
+    }
+    students[NUM_STUDENTS - 1] = 9999; // End marker
+
+    // Create semaphores
+    int semid = semget(SEM_KEY, NUM_TAS, IPC_CREAT | 0666);
+    if (semid < 0) {
+        perror("semget failed");
+        exit(1);
+    }
+
+    // Initialize all semaphores to 1 (unlocked state)
     for (int i = 0; i < NUM_TAS; i++) {
         if (semctl(semid, i, SETVAL, 1) < 0) {
             perror("semctl failed");
-            exit(EXIT_FAILURE);
+            exit(1);
         }
     }
 
-    // Fork 5 processes, one for each TA
-    for (int i = 0; i < NUM_TAS; i++) {
-        if ((pids[i] = fork()) == 0) {
-            // Child process: TA functionality
-            ta_process(i + 1, semid);
-            exit(0);
-        } else if (pids[i] < 0) {
-            perror("fork failed");
-            exit(EXIT_FAILURE);
+    // Create TA processes
+    for (int i = 1; i <= NUM_TAS; i++) {
+        if (fork() == 0) {
+            // Child process executes the TA logic
+            TA_process(i, semid, students);
+            exit(0); // Exit child process after work is done
         }
     }
 
-    // Parent process waits for all child processes to complete
+    // Wait for all TA processes to finish
     for (int i = 0; i < NUM_TAS; i++) {
-        waitpid(pids[i], NULL, 0);
+        wait(NULL);
     }
+
+    // Cleanup: detach and remove shared memory
+    shmdt(students);
+    shmctl(shmid, IPC_RMID, NULL);
 
     // Remove semaphores
-    semctl(semid, 0, IPC_RMID, 0);
+    semctl(semid, 0, IPC_RMID);
 
+    printf("All TAs have finished marking.\n");
     return 0;
-}
-
-// Function: TA Process
-void ta_process(int ta_id, int semid) {
-    char filename[20];
-    snprintf(filename, sizeof(filename), "TA%d.txt", ta_id); // Create TA file
-    FILE *ta_file = fopen(filename, "w"); // Open the files for writing and clear their current contents
-    if (!ta_file) {
-        perror("Failed to create TA file");
-        exit(EXIT_FAILURE);
-    }
-
-    FILE *db_file = fopen(DATABASE, "r");
-    if (!db_file) {
-        perror("Failed to open database file");
-        exit(EXIT_FAILURE);
-    }
-
-    int cycle_count = 0;
-    char student_number[5]; // String to hold student ID (4 digits + null terminator)
-
-    while (cycle_count < 3) { // Process each student 3 times
-        // Lock current and next semaphore
-        semaphore_lock(semid, ta_id - 1);
-        semaphore_lock(semid, ta_id % NUM_TAS);
-
-        // Access the database
-        if (fscanf(db_file, "%4s", student_number) == EOF) {
-            // Rewind if end of file is reached
-            rewind(db_file);
-            cycle_count++;
-            continue;
-        }
-        printf("TA %d accessing database: Student %s\n", ta_id, student_number);
-
-        // Simulate delay while accessing database
-        sleep(generate_random(1, 4));
-
-        // Unlock semaphores
-        semaphore_unlock(semid, ta_id - 1);
-        semaphore_unlock(semid, ta_id % NUM_TAS);
-
-        // Mark the student
-        int mark = generate_random(0, 10);
-        printf("TA %d marking Student %s with grade %d\n", ta_id, student_number, mark);
-        fprintf(ta_file, "Student %s: Grade %d\n", student_number, mark);
-        fflush(ta_file); // Ensure data is written to the file immediately
-
-        // Simulate marking delay
-        sleep(generate_random(1, 10));
-    }
-
-    fclose(ta_file); // Close the TA file
-    fclose(db_file); // Close the database file
-    printf("TA %d finished marking.\n", ta_id);
-}
-
-
-// Semaphore Lock
-void semaphore_lock(int semid, int sem_num) {
-    struct sembuf sb = {sem_num, -1, 0}; // Decrement semaphore
-    semop(semid, &sb, 1);
-}
-
-// Semaphore Unlock
-void semaphore_unlock(int semid, int sem_num) {
-    struct sembuf sb = {sem_num, 1, 0}; // Increment semaphore
-    semop(semid, &sb, 1);
 }
