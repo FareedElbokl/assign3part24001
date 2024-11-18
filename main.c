@@ -35,13 +35,23 @@ void TA_process(int id, int semid, int* students) {
     }
 
     int rounds = 0;
-    int index = 0; // All TA's start at the first student (previously was id - 1)
+    int index = 0; // All TAs start at the first student
     srand(time(NULL) ^ getpid()); // Initialize random seed for delays
 
     while (rounds < 3) {
-        // Lock semaphores for current TA and the next TA in the circular table
-        lock(semid, id - 1);          // Lock TA's own semaphore
-        lock(semid, id % NUM_TAS);    // Lock the next TA's semaphore
+        // NOTE: the 5 semaphores in the semaphore set are numbered from 0-4, so TA j's corresponding semaphore is accessed using j-1
+
+        // Try to acquire the first semaphore
+        lock(semid, id - 1);
+
+        // Try to acquire the second semaphore
+        struct sembuf op = {id % NUM_TAS, -1, IPC_NOWAIT}; // Non-blocking decrement
+        if (semop(semid, &op, 1) < 0) { // Failed to acquire the second semaphore
+            printf("TA%d failed to acquire semaphore %d\n", id, id+1); // Display message
+            unlock(semid, id - 1); // Release the first semaphore
+            sleep(rand() % 2 + 1); // Wait for a short random delay before retrying
+            continue; // Try again in the next loop iteration
+        }
 
         // Access the shared memory
         printf("TA%d is currently accessing the database\n", id);
@@ -50,7 +60,7 @@ void TA_process(int id, int semid, int* students) {
         // Simulate access database delay for 1-4 seconds
         sleep(rand() % 4 + 1);
 
-        // Release semaphores before marking
+        // Release semaphores after accessing the database
         unlock(semid, id - 1);        // Unlock TA's own semaphore
         unlock(semid, id % NUM_TAS); // Unlock the next TA's semaphore
 
@@ -75,6 +85,7 @@ void TA_process(int id, int semid, int* students) {
     fclose(output);
     printf("TA%d has finished marking.\n", id);
 }
+
 
 
 
