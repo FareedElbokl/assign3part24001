@@ -36,7 +36,7 @@ void TA_process(int id, int semid, int* students) {
 
     int rounds = 0;
     int index = 0; // All TA's start at the first student (previously was id - 1)
-    srand(time(NULL) ^ getpid()); // Initialize random seed for delays
+    srand(time(NULL) ^ getpid()); // Initialize random seed for delays. By providing a dynamic value like in this case the current time or process id, this ensures numbers are more random
 
     while (rounds < 3) {
         // Lock semaphores for current TA and the next TA in the circular table
@@ -72,7 +72,7 @@ void TA_process(int id, int semid, int* students) {
         }
     }
 
-    fclose(output);
+    fclocse(output);
     printf("TA%d has finished marking.\n", id);
 }
 
