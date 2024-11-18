@@ -66,7 +66,7 @@ int main() {
 void ta_process(int ta_id, int semid) {
     char filename[20];
     snprintf(filename, sizeof(filename), "TA%d.txt", ta_id); // Create TA file
-    FILE *ta_file = fopen(filename, "w");
+    FILE *ta_file = fopen(filename, "w"); // Open the files for writing and clear their current contents
     if (!ta_file) {
         perror("Failed to create TA file");
         exit(EXIT_FAILURE);
@@ -79,7 +79,7 @@ void ta_process(int ta_id, int semid) {
     }
 
     int cycle_count = 0;
-    int student_number;
+    char student_number[5]; // String to hold student ID (4 digits + null terminator)
 
     while (cycle_count < 3) { // Process each student 3 times
         // Lock current and next semaphore
@@ -87,13 +87,13 @@ void ta_process(int ta_id, int semid) {
         semaphore_lock(semid, ta_id % NUM_TAS);
 
         // Access the database
-        if (fscanf(db_file, "%d", &student_number) == EOF) {
+        if (fscanf(db_file, "%4s", student_number) == EOF) {
             // Rewind if end of file is reached
             rewind(db_file);
             cycle_count++;
             continue;
         }
-        printf("TA %d accessing database: Student %d\n", ta_id, student_number);
+        printf("TA %d accessing database: Student %s\n", ta_id, student_number);
 
         // Simulate delay while accessing database
         sleep(generate_random(1, 4));
@@ -104,17 +104,19 @@ void ta_process(int ta_id, int semid) {
 
         // Mark the student
         int mark = generate_random(0, 10);
-        printf("TA %d marking Student %d with grade %d\n", ta_id, student_number, mark);
-        fprintf(ta_file, "Student %d: Grade %d\n", student_number, mark);
+        printf("TA %d marking Student %s with grade %d\n", ta_id, student_number, mark);
+        fprintf(ta_file, "Student %s: Grade %d\n", student_number, mark);
+        fflush(ta_file); // Ensure data is written to the file immediately
 
         // Simulate marking delay
         sleep(generate_random(1, 10));
     }
 
-    fclose(ta_file);
-    fclose(db_file);
+    fclose(ta_file); // Close the TA file
+    fclose(db_file); // Close the database file
     printf("TA %d finished marking.\n", ta_id);
 }
+
 
 // Semaphore Lock
 void semaphore_lock(int semid, int sem_num) {
