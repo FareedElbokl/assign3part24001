@@ -14,12 +14,13 @@ void semaphore_lock(int semid, int sem_num);
 void semaphore_unlock(int semid, int sem_num);
 void ta_process(int ta_id, int semid);
 
-// Helper Functions
+// Helper Function to generate random nums
 int generate_random(int min, int max) {
     return rand() % (max - min + 1) + min;
 }
 
 int main() {
+    // Set up semaphores and TA processes
     key_t sem_key = 1234; // Semaphore key
     int semid;
     pid_t pids[NUM_TAS];
