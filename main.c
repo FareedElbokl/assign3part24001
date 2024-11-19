@@ -105,7 +105,7 @@ int main() {
 
     // Initialize the student list in shared memory
     for (int i = 0; i < NUM_STUDENTS - 1; i++) {
-        students[i] = 1000 + i; // Students numbered from 1000 to 1019
+        students[i] = 0000 + (i+1); // Students numbered from 0000
     }
     students[NUM_STUDENTS - 1] = 9999; // End marker
 
